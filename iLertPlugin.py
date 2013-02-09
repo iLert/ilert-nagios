@@ -1,4 +1,12 @@
-import iLertIncident, time
+########################################################################
+# This is the iLert nagios plugin v1.0
+# (c) by iLert 2013
+# 
+# File: iLertPlugin.py
+# Desc: Main component of the iLert nagios plugin
+########################################################################
+ 
+import iLertIncident, time, os
 from optparse import OptionParser 
 
 # Variable definition
@@ -7,12 +15,13 @@ from optparse import OptionParser
 #host = 'mustino.ilertnow.com'
 
 # Define nagios plugin options
-parser = OptionParser("iLertPlugin.py -m [nagios|cronjob] -a Apikey -i iLertHost -p Writepath")
+parser = OptionParser("iLertPlugin.py -m {nagios|cronjob} [-a apikey] [-i iLertHost] -p Writepath")
 parser.add_option("-m", "--mode", dest="mode", help="Execution mode [nagios|cronjob]")
-parser.add_option("-a", "--apikey", dest="apikey", help="Apikey for authentication in nagios mode")
-parser.add_option("-i", "--iLerthost", dest="host", help="iLert hostname like ***.ilertnow.com")
-parser.add_option("-p", "--path", dest="path", help="Path for write the incident")
+parser.add_option("-a", "--apikey", dest="apikey", help="(optional) API-Key for the iLert-Account")
+parser.add_option("-i", "--iLerthost", dest="host", help="(optional) iLert hostname like ***.ilertnow.com")
+parser.add_option("-p", "--path", dest="path", help="Path for write the inncident")
 (options, args) = parser.parse_args()
+
 
 # Define nagios plugin parameters
 mode = ""
@@ -21,53 +30,67 @@ host = ""
 path = ""
 
 # Check if parameters are set
-if (options.mode != "") and (options.apikey != "") and (options.host != "") and (options.path != ""): 
-	mode = options.mode
-	apikey = options.apikey
-	host = options.host
+if (options.mode != None) and (options.path != None): 
+	mode = options.mode	
 	path = options.path
 else:
-	parser.error("The nagios iLertPlugin expect exactly four arguments to start.")
-	
+	parser.error("The nagios iLertPlugin expect at least two arguments to start.")
+
+# Optional parameter 'apikey'
+if (options.apikey != None):
+	apikey = options.apikey
+else:
+	apikey = os.environ['NAGIOS_CONTACTPAGER']
+
+# Optional parameter 'host'
+if (options.host != None):
+	host = options.host
+else:
+	host = "ilertnow.com"
+
 
 # Send incident to iLert
 try:	
 	if mode == "nagios": 
 		xmldoc = ""
-		xmldoc = iLertIncident.create(apikey)					
+		xmldoc = iLertIncident.create(apikey)		
 		
-		# Write with mode 0 = temporarly (postfix *.tmp)
-		tmpFilename = ""
-		tmpFilename = iLertIncident.write(path, xmldoc, 0)
+		# Persisting incident by writing file to filesystem
+		filename = ""
+		filename = iLertIncident.write(path, xmldoc)
 		
-		if tmpFilename == "":
+		if filename == "":
 			raise Exception("8001")
 		
 		s_result = iLertIncident.send(host, xmldoc)
-		
-		if s_result != 0:			
-			# Write with mode 1 = finally (postfix *.ilert)
-			iLertFilename = iLertIncident.write(path, xmldoc, 1)			
-			iLertIncident.delete(tmpFilename)
-			
-			if iLertFilename == "":
-				raise Exception("8002")
-		else:
-			iLertIncident.delete(tmpFilename)
+				
+		# Deletes persisted incident when sending succeeded
+		if s_result == 0:			
+			iLertIncident.delete(filename)
 			
 	elif mode == "cronjob":
 		incidentList = iLertIncident.readList(path)
-		if len(incidentList) > 0:
-			for alert in incidentList:
+		if len(incidentList) > 0:			
+			count = len(incidentList)
+			i = 0
+			alert = ''
+
+			while i < count:
+				alert = incidentList[i] 
 				if alert.endswith(".ilert"):
-					pos = incidentList.index(alert)
-					del incidentList[pos]	
 					rfile = "%s/%s" % (path, alert)
-					xmldoc = iLertIncident.readXmldoc(rfile)					
-					s_result = iLertIncident.send(host, xmldoc)
+					xmldoc = iLertIncident.readXmldoc(rfile)
 					
+					# if the current file is locked by another thread
+					if (xmldoc == "blocked"):
+						i+=1
+						continue
+						
+					s_result = iLertIncident.send(host, xmldoc)
+										
 					if s_result == 0:
-						iLertIncident.delete(rfile)						
+						iLertIncident.delete(rfile)	
+				i+=1				
 	else:
 		parser.error("The iLert nagios plugin mode is not defined.")
 		
