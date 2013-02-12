@@ -1,5 +1,5 @@
 ########################################################################
-# This is the iLert nagios plugin v1.0
+# This is the iLert nagios plugin v1.2
 # (c) by iLert 2013
 # 
 # File: iLertIncident.py
@@ -7,7 +7,7 @@
 ########################################################################
 
 # Libs
-import os, fcntl, httplib, urllib, uuid
+import os, fcntl, httplib, urllib
 
 ########################################################################
 # Creates incident content with nagios macros from environment
@@ -16,7 +16,7 @@ def create(apikey):
 	# XML document start tag
 	xmldoc = "<event><apiKey>%s</apiKey><payload>" % (apikey)
 	
-	# Read NAGIOS macros
+	# Read NAGIOS macros	
 	for env in os.environ:
 		if ("NAGIOS_" in env):
 			xmldoc += "<entry key=\"%s\">%s</entry>" % (env, os.environ[env])		
@@ -39,34 +39,28 @@ def create(apikey):
 ########################################################################
 # Writes incident as file to persist
 ########################################################################
-def write(path, xmldoc):
-	# Write temporary file
-	filename = "%s.ilert" % uuid.uuid4()
-	path += "/%s" % filename
-
+def write(f, xmldoc):
+	# Write temporary file	
 	try:
-		f = open(path, "wb")
 		fd = f.fileno();
 		fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
 		f.write(xmldoc)
-		f.close()
-		return path
+		return 0
 	except IOError:
-		print("Write file (%s) blocked" % path)
 		f.close()		
-		return ""
+		return 1
     		
 ########################################################################
 # Sends incident to iLert
 ########################################################################
-def send(host, xmldoc):	
+def send(host, port, xmldoc):	
 	headers = {"Content-type": "application/xml", "Accept": "application/xml"}
 	data = ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>")
 
 	data +=xmldoc
 	
 	try:
-		conn = httplib.HTTPConnection(host, 80, timeout=10)
+		conn = httplib.HTTPConnection(host, port, timeout=10)
 		conn.request("POST", "/rest/events", data, headers)
 		response = conn.getresponse()
 	
