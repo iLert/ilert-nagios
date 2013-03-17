@@ -162,7 +162,7 @@ def main():
 
     if options.apikey is not None:
         apikey = options.apikey
-    else:
+    elif 'NAGIOS_CONTACTPAGER' in os.environ:
         apikey = os.environ['NAGIOS_CONTACTPAGER']
 
     if options.host is not None:
