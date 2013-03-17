@@ -155,7 +155,7 @@ def main():
         parser.error('missing required mode parameter.')
 
     # optional parameters
-    if options.path is not None:
+    if options.directory is not None:
         directory = options.directory
     else:
         directory = "/tmp/ilert_nagios"
