@@ -1,152 +1,202 @@
-########################################################################
-# This is the iLert nagios plugin v1.2
-# (c) by iLert 2013
-# 
-# File: iLertPlugin.py
-# Desc: Main component of the iLert nagios plugin
-########################################################################
-
-# Libs
-import iLertIncident, time, os, uuid, syslog
-from optparse import OptionParser 
-
-# Define nagios plugin options
-parser = OptionParser("iLertPlugin.py -m {nagios|cronjob} [-a apikey] [-i iLertHost] [-p Port] -d Writepath")
-parser.add_option("-m", "--mode", dest="mode", help="Execution mode [nagios|cronjob]")
-parser.add_option("-a", "--apikey", dest="apikey", help="(optional) API-Key for the iLert-Account")
-parser.add_option("-i", "--iLerthost", dest="host", help="(optional) iLert hostname like ***.ilertnow.com")
-parser.add_option("-p", "--port", dest="port", help="(optional) host port - default port is 80")
-parser.add_option("-d", "--directory", dest="path", help="Path/Directory for write the inncident")
-(options, args) = parser.parse_args()
+#!/usr/bin/env python
 
 
-# Define nagios plugin parameters
-mode = ""
-apikey = ""
-host = ""
-port = ""
-path = ""
+# iLert Nagios Plugin
+#
+# Copyright (c) 2013, iLert UG. <info@ilert.de>
+# All rights reserved.
 
-# Check if parameters are set
-if (options.mode != None) and (options.path != None): 
-	mode = options.mode	
-	path = options.path
-else:
-	parser.error("The nagios iLertPlugin expect at least two arguments to start.")
 
-# Optional parameter 'apikey'
-if (options.apikey != None):
-	apikey = options.apikey
-else:
-	apikey = os.environ['NAGIOS_CONTACTPAGER']
+import os, sys, uuid, syslog, fcntl, httplib
+from optparse import OptionParser
 
-# Optional parameter 'host'
-if (options.host != None):
-	host = options.host
-else:
-	host = "ilertnow.com"
 
-# Optional parameter 'port'
-try:
-	if (options.port != None):
-		port = int(options.port)
-		if (port <0 or port >65535):
-			raise NameError('Portrange')
-	else:
-		port = 80
-		
-except ValueError as e:
-	print type(e)
-	print e.args	
-	print "The port parameter have to be a number."
-	raise
-	
-except NameError as e:
-	print type(e)
-	print e.args	
-	print "Please choose a port between 0 and 65535."
-	raise
+def persist_event(apikey, directory):
+    """Persists nagios event to disk"""
+    syslog.syslog('writing event to disk...')
 
-# Send incident to iLert
-try:	
-	if mode == "nagios": 
-		syslog.syslog('Nagios called iLert plugin...')
-				
-		# Create XML content
-		xmldoc = ""		
-		xmldoc = iLertIncident.create(apikey)
-		incidentID = uuid.uuid4()
-		
-		# Create filename
-		filename = ""
-		filename = "%s.ilert" % incidentID	
-		syslog.syslog('iLert nagios plugin created an incident %s' % incidentID)	
-		
-		# Persisting incident by writing file to filesystem
-		path += "/%s" % filename 	
-		f = open(path, "wb")
-		res = iLertIncident.write(f, xmldoc)
-		
-		if res == 1:
-			raise Exception("8001")
-		
-		syslog.syslog('iLert nagios plugin start to send incident %s...' % incidentID)
-		#time.sleep(60)
-		s_result = iLertIncident.send(host, port, xmldoc)		
-		f.close()
-		
-		# Deletes persisted incident when sending succeeded
-		if s_result == 0:			
-			syslog.syslog('iLert nagios plugin sent incident %s successful.' % incidentID)
-			iLertIncident.delete(path)
-		else:
-			syslog.syslog(syslog.LOG_ALERT, 'Sending incident failed and stored as %s' % filename)
-		
-	elif mode == "cronjob":
-		syslog.syslog('Cronjob called iLert app...')
-		incidentList = iLertIncident.readList(path)
-		if len(incidentList) > 0:			
-			count = len(incidentList)
-			i = 0
-			alert = ''
+    xmldoc = create_xml(apikey)
 
-			while i < count:
-				alert = incidentList[i] 
-				if alert.endswith(".ilert"):					
-					rfile = "%s/%s" % (path, alert)
-					xmldoc = iLertIncident.readXmldoc(rfile)
-					
-					# if the current file is locked by another thread
-					if (xmldoc == "blocked"):
-						i+=1
-						continue
-						
-					syslog.syslog('iLert cronjob reads alert %s' % alert)	
-					syslog.syslog('iLert cronjob start to send incident %s...' % alert)
-					s_result = iLertIncident.send(host, port, xmldoc)
-										
-					if s_result == 0:
-						syslog.syslog('iLert cronjob sent incident %s successful.' % alert)
-						iLertIncident.delete(rfile)	
-					else:
-						syslog.syslog(syslog.LOG_ALERT, 'Sending incident failed and stored as %s' % alert)
-				i+=1				
-	else:
-		parser.error("The iLert nagios plugin mode is not defined.")
-		
-except Exception as e:
-	print type(e)
-	print e.args
-	f.close()
-	t = time.strftime("%d%m%Y_%H-%M-%S")
-	if e == "8001":		
-		print "Nagios iLertPlugin could not write incident in file - Timestamp(%s)" %t
-	else:
-		print "An error occurs at running nagios iLertPlugin - Timestamp(%s)" %t
-	exit(1)
-except:
-	f.close()
-	print "Nagios iLertPlugin - Unexpected error:"
-	exit(1)
+    filename = "%s.ilert" % uuid.uuid4()
+    filename_tmp = "%s.tmp" % uuid.uuid4()
+    file_path = "%s/%s" % (directory, filename)
+    file_path_tmp = "%s/%s" % (directory, filename_tmp)
 
-exit(0)
+    try:
+        # atomic write using tmp file, see http://stackoverflow.com/questions/2333872
+        f = open(file_path_tmp, "w")
+        f.write(xmldoc)
+        # make sure all data is on disk
+        f.flush()
+        # skip os.sync in favor of peromance/responsiveness
+        #os.fsync(f.fileno())
+        f.close()
+        os.rename(file_path_tmp, file_path)
+        syslog.syslog('created a nagios event in %s' % file_path)
+    except Exception as e:
+        syslog.syslog(syslog.LOG_ERR, "could not write nagios event into %s. Cause: %s %s" % (file_path, type(e), e.args))
+        exit(1)
+    finally:
+        f.close()
+
+
+def lock_and_flush(host, directory, port):
+    """Lock event dir and call flush"""
+    lock_filename = "%s/lockfile" % directory
+
+    lockfile = open(lock_filename, "w")
+
+    try:
+        fcntl.flock(lockfile.fileno(), fcntl.LOCK_EX)
+        flush(host, directory, port)
+    finally:
+        lockfile.close()
+
+
+def flush(host, directory, port):
+    """Send all events in event dir to iLert"""
+    syslog.syslog('sending nagios events to iLert...')
+
+    eventList = os.listdir(directory)
+
+    for event in eventList:
+        if event.endswith(".ilert"):
+            file_name = "%s/%s" % (directory, event)
+
+            xmldoc = ""
+            try:
+                f = open(file_name, "r")
+                for line in f:
+                    xmldoc += line
+            except IOError:
+                continue
+            finally:
+                f.close()
+
+            syslog.syslog('sending event %s to ilert...' % event)
+            s_result = send(host, port, xmldoc)
+
+            if s_result == 0:
+                os.remove(file_name)
+                syslog.syslog('event %s has been sent to iLert and removed from event directory' % event)
+            else:
+                syslog.syslog(syslog.LOG_ERR, 'sending event %s failed' % event)
+
+
+def create_xml(apikey):
+    """Creates incident xml content with nagios macros from environment"""
+
+    xmldoc = "<event><apiKey>%s</apiKey><payload>" % apikey
+
+    # read NAGIOS macros from environment variables
+    for env in os.environ:
+        if "NAGIOS_" in env:
+            xmldoc += "<entry key=\"%s\">%s</entry>" % (env, os.environ[env])
+
+    xmldoc += "<entry key=\"%s\">%s</entry>" % ("PLUGIN_VERSION", "1.0")
+
+    # XML document end tag
+    xmldoc += "</payload></event>"
+
+    return xmldoc
+
+
+def write(f, xmldoc):
+    """Writes incident as file to persist"""
+    # Write temporary file
+    try:
+        fd = f.fileno()
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        f.write(xmldoc)
+        return 0
+    except IOError:
+        f.close()
+        return 1
+
+
+def send(host, port, xmldoc):
+    """Sends incident to iLert"""
+    headers = {"Content-type": "application/xml", "Accept": "application/xml"}
+    data = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+
+    data += xmldoc
+
+    try:
+        conn = httplib.HTTPConnection(host, port, timeout=60)
+        conn.request("POST", "/rest/events", data, headers)
+        response = conn.getresponse()
+
+        if (response.status == "200") or (response.reason == "OK"):
+            return 0
+
+        return 1
+    except Exception as e:
+        print type(e)
+        print e.args
+        return 1
+    finally:
+        conn.close()
+
+
+def main():
+    # Define nagios plugin options
+    parser = OptionParser("ilert_nagios.py -m {nagios|cron} [-a apikey] [-i iLertHost] [-p Port] [-d eventDir]")
+    parser.add_option("-m", "--mode", dest="mode", help="Execution mode [nagios|cron]")
+    parser.add_option("-a", "--apikey", dest="apikey", help="(optional) API-Key for the iLert account")
+    parser.add_option("-i", "--iLerthost", dest="host", help="(optional) iLert host - default is ilertnow.com")
+    parser.add_option("-p", "--port", dest="port", help="(optional) host port - default port is 80")
+    parser.add_option("-d", "--dir", dest="directory", help="(optional) event directory where incidents are stored")
+    (options, args) = parser.parse_args()
+
+    # required parameters
+    if options.mode is not None:
+        mode = options.mode
+    else:
+        parser.error('missing required mode parameter.')
+
+    # optional parameters
+    if options.path is not None:
+        directory = options.directory
+    else:
+        directory = "/tmp/ilert_nagios"
+
+    if options.apikey is not None:
+        apikey = options.apikey
+    else:
+        apikey = os.environ['NAGIOS_CONTACTPAGER']
+
+    if options.host is not None:
+        host = options.host
+    else:
+        host = "ilertnow.com"
+
+    try:
+        if options.port is not None:
+            port = int(options.port)
+            if port < 0 or port > 65535:
+                raise ValueError('Invalid port')
+        else:
+            port = 80
+
+    except ValueError as e:
+        print type(e)
+        print e.args
+        print "The port parameter has to be a number between 0 and 65535."
+        sys.exit()
+
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+    if mode == "nagios":
+        persist_event(apikey, directory)
+        lock_and_flush(host, directory, port)
+    elif mode == "cron":
+        lock_and_flush(host, directory, port)
+    else:
+        parser.error("The iLert nagios plugin mode is not defined.")
+
+    exit(0)
+
+
+if __name__ == '__main__':
+    main()
