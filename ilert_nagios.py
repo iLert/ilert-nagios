@@ -122,17 +122,18 @@ def send(host, port, xmldoc):
     data += xmldoc
 
     try:
+        syslog.syslog('connecting to iLert at host % and port %s...' % (host, port))
         conn = httplib.HTTPConnection(host, port, timeout=60)
         conn.request("POST", "/rest/events", data, headers)
         response = conn.getresponse()
 
         if (response.status == "200") or (response.reason == "OK"):
             return 0
-
-        return 1
+        else:
+            syslog.syslog(syslog.LOG_ERR, "could not send nagios event to iLert. Status: %s, reason: %s, body: %s" % (response.status, response.reason, response.read()))
+            return 1
     except Exception as e:
-        print type(e)
-        print e.args
+        syslog.syslog(syslog.LOG_ERR, "could not send nagios event to iLert. Cause: %s %s" % (type(e), e.args))
         return 1
     finally:
         conn.close()
