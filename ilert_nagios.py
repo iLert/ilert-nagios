@@ -122,7 +122,7 @@ def send(host, port, xmldoc):
     data += xmldoc
 
     try:
-        syslog.syslog('connecting to iLert at host % and port %s...' % (host, port))
+        syslog.syslog('connecting to iLert at host %s and port %s...' % (host, port))
         conn = httplib.HTTPConnection(host, port, timeout=60)
         conn.request("POST", "/rest/events", data, headers)
         response = conn.getresponse()
