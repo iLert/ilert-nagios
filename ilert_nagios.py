@@ -28,20 +28,20 @@ def persist_event(apikey, directory):
         f.write(xmldoc)
         # make sure all data is on disk
         f.flush()
-        # skip os.sync in favor of peromance/responsiveness
+        # skip os.sync in favor of performance/responsiveness
         #os.fsync(f.fileno())
         f.close()
         os.rename(file_path_tmp, file_path)
         syslog.syslog('created a nagios event in %s' % file_path)
     except Exception as e:
-        syslog.syslog(syslog.LOG_ERR, "could not write nagios event into %s. Cause: %s %s" % (file_path, type(e), e.args))
+        syslog.syslog(syslog.LOG_ERR, "could not write nagios event to %s. Cause: %s %s" % (file_path, type(e), e.args))
         exit(1)
     finally:
         f.close()
 
 
 def lock_and_flush(host, directory, port):
-    """Lock event dir and call flush"""
+    """Lock event directory and call flush"""
     lock_filename = "%s/lockfile" % directory
 
     lockfile = open(lock_filename, "w")
@@ -54,7 +54,7 @@ def lock_and_flush(host, directory, port):
 
 
 def flush(host, directory, port):
-    """Send all events in event dir to iLert"""
+    """Send all events in event directory to iLert"""
     syslog.syslog('sending nagios events to iLert...')
 
     eventList = os.listdir(directory)
@@ -84,7 +84,7 @@ def flush(host, directory, port):
 
 
 def create_xml(apikey):
-    """Creates incident xml content with nagios macros from environment"""
+    """Create incident xml content with nagios macros provided via environment variables"""
 
     xmldoc = "<event><apiKey>%s</apiKey><payload>" % apikey
 
@@ -101,21 +101,8 @@ def create_xml(apikey):
     return xmldoc
 
 
-def write(f, xmldoc):
-    """Writes incident as file to persist"""
-    # Write temporary file
-    try:
-        fd = f.fileno()
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        f.write(xmldoc)
-        return 0
-    except IOError:
-        f.close()
-        return 1
-
-
 def send(host, port, xmldoc):
-    """Sends incident to iLert"""
+    """Send event to iLert"""
     headers = {"Content-type": "application/xml", "Accept": "application/xml"}
     data = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
 
@@ -130,7 +117,7 @@ def send(host, port, xmldoc):
         if (response.status == "200") or (response.reason == "OK"):
             return 0
         else:
-            syslog.syslog(syslog.LOG_ERR, "could not send nagios event to iLert. Status: %s, reason: %s, body: %s" % (response.status, response.reason, response.read()))
+            syslog.syslog(syslog.LOG_ERR, "could not send nagios event to iLert. Status: %s, reason: %s" % (response.status, response.reason))
             return 1
     except Exception as e:
         syslog.syslog(syslog.LOG_ERR, "could not send nagios event to iLert. Cause: %s %s" % (type(e), e.args))
