@@ -16,9 +16,15 @@ def persist_event(apikey, directory):
     syslog.syslog('writing event to disk...')
 
     xmldoc = create_xml(apikey)
+    
+    # Old UUID
+    # oneUuid = uuid.uuid4()
+    
+    # New UUID
+    oneUuid = int(time.time()*100000)
 
-    filename = "%s.ilert" % uuid.uuid4()
-    filename_tmp = "%s.tmp" % uuid.uuid4()
+    filename = "%d.ilert" % oneUuid
+    filename_tmp = "%d.tmp" % oneUuid
     file_path = "%s/%s" % (directory, filename)
     file_path_tmp = "%s/%s" % (directory, filename_tmp)
 
@@ -58,6 +64,7 @@ def flush(host, directory, port):
     syslog.syslog('sending nagios events to iLert...')
 
     eventList = os.listdir(directory)
+    eventList.sort()
 
     for event in eventList:
         if event.endswith(".ilert"):
@@ -175,10 +182,10 @@ def main():
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-    if mode == "nagios":
+    if mode == "nagios":		
         persist_event(apikey, directory)
         lock_and_flush(host, directory, port)
-    elif mode == "cron":
+    elif mode == "cron":		
         lock_and_flush(host, directory, port)
     else:
         parser.error("The iLert nagios plugin mode is not defined.")
