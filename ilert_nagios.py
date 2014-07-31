@@ -7,7 +7,7 @@
 # All rights reserved.
 
 
-import os, sys, uuid, syslog, fcntl, httplib
+import os, sys, uuid, syslog, fcntl, httplib, time
 from optparse import OptionParser
 
 
@@ -100,7 +100,7 @@ def create_xml(apikey):
         if "NAGIOS_" in env:
             xmldoc += "<entry key=\"%s\">%s</entry>" % (env, os.environ[env])
 
-    xmldoc += "<entry key=\"%s\">%s</entry>" % ("PLUGIN_VERSION", "1.0")
+    xmldoc += "<entry key=\"%s\">%s</entry>" % ("PLUGIN_VERSION", "1.0.1")
 
     # XML document end tag
     xmldoc += "</payload></event>"
