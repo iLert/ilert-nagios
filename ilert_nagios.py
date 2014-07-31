@@ -7,7 +7,12 @@
 # All rights reserved.
 
 
-import os, sys, uuid, syslog, fcntl, httplib, time
+import os
+import sys
+import syslog
+import fcntl
+import httplib
+import time
 from optparse import OptionParser
 
 
@@ -16,12 +21,12 @@ def persist_event(apikey, directory):
     syslog.syslog('writing event to disk...')
 
     xmldoc = create_xml(apikey)
-    
+
     # Old UUID
     # oneUuid = uuid.uuid4()
-    
+
     # New UUID
-    oneUuid = int(time.time()*100000)
+    oneUuid = int(time.time() * 100000)
 
     filename = "%d.ilert" % oneUuid
     filename_tmp = "%d.tmp" % oneUuid
@@ -35,7 +40,7 @@ def persist_event(apikey, directory):
         # make sure all data is on disk
         f.flush()
         # skip os.sync in favor of performance/responsiveness
-        #os.fsync(f.fileno())
+        # os.fsync(f.fileno())
         f.close()
         os.rename(file_path_tmp, file_path)
         syslog.syslog('created a nagios event in %s' % file_path)
@@ -124,7 +129,8 @@ def send(host, port, xmldoc):
         if (response.status == "200") or (response.reason == "OK"):
             return 0
         else:
-            syslog.syslog(syslog.LOG_ERR, "could not send nagios event to iLert. Status: %s, reason: %s" % (response.status, response.reason))
+            syslog.syslog(syslog.LOG_ERR, "could not send nagios event to iLert. Status: %s, reason: %s" % (
+                response.status, response.reason))
             return 1
     except Exception as e:
         syslog.syslog(syslog.LOG_ERR, "could not send nagios event to iLert. Cause: %s %s" % (type(e), e.args))
@@ -182,10 +188,10 @@ def main():
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-    if mode == "nagios":		
+    if mode == "nagios":
         persist_event(apikey, directory)
         lock_and_flush(host, directory, port)
-    elif mode == "cron":		
+    elif mode == "cron":
         lock_and_flush(host, directory, port)
     else:
         parser.error("The iLert nagios plugin mode is not defined.")
