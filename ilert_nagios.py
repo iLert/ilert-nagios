@@ -13,7 +13,11 @@ import syslog
 import fcntl
 import httplib
 import time
+from xml.sax.saxutils import escape
+from xml.sax.saxutils import quoteattr
 from optparse import OptionParser
+
+PLUGIN_VERSION = "1.1"
 
 
 def persist_event(apikey, directory):
@@ -102,10 +106,10 @@ def create_xml(apikey):
 
     # read NAGIOS macros from environment variables
     for env in os.environ:
-        if "NAGIOS_" in env:
-            xmldoc += "<entry key=\"%s\">%s</entry>" % (env, os.environ[env])
+        if "NAGIOS_" in env or "ICINGA_" in env:
+            xmldoc += "<entry key=%s>%s</entry>" % (quoteattr(env), escape(os.environ[env]))
 
-    xmldoc += "<entry key=\"%s\">%s</entry>" % ("PLUGIN_VERSION", "1.0.1")
+    xmldoc += "<entry key=\"%s\">%s</entry>" % ("PLUGIN_VERSION", PLUGIN_VERSION)
 
     # XML document end tag
     xmldoc += "</payload></event>"
@@ -143,10 +147,11 @@ def main():
     # Define nagios plugin options
     parser = OptionParser("ilert_nagios.py -m {nagios|cron} [-a apikey] [-i iLertHost] [-p Port] [-d eventDir]")
     parser.add_option("-m", "--mode", dest="mode", help="Execution mode [nagios|cron]")
-    parser.add_option("-a", "--apikey", dest="apikey", help="(optional) API-Key for the iLert account")
+    parser.add_option("-a", "--apikey", dest="apikey", help="(optional) API key for the iLert account")
     parser.add_option("-i", "--iLerthost", dest="host", help="(optional) iLert host - default is ilertnow.com")
     parser.add_option("-p", "--port", dest="port", help="(optional) host port - default port is 80")
-    parser.add_option("-d", "--dir", dest="directory", help="(optional) event directory where incidents are stored")
+    parser.add_option("-d", "--dir", dest="directory",
+                      help="(optional) event directory where incidents are stored - default is /tmp/ilert_nagios")
     (options, args) = parser.parse_args()
 
     # required parameters
@@ -165,6 +170,8 @@ def main():
         apikey = options.apikey
     elif 'NAGIOS_CONTACTPAGER' in os.environ:
         apikey = os.environ['NAGIOS_CONTACTPAGER']
+    elif 'ICINGA_CONTACTPAGER' in os.environ:
+        apikey = os.environ['ICINGA_CONTACTPAGER']
 
     if options.host is not None:
         host = options.host
