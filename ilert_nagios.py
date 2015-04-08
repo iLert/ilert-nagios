@@ -168,6 +168,8 @@ def main():
         apikey = os.environ['NAGIOS_CONTACTPAGER']
     elif 'ICINGA_CONTACTPAGER' in os.environ:
         apikey = os.environ['ICINGA_CONTACTPAGER']
+    else:
+        apikey = None
 
     if options.host is not None:
         host = options.host
@@ -189,6 +191,11 @@ def main():
         os.makedirs(directory)
 
     if mode == "nagios":
+        if apikey is None:
+            error_msg = "parameter apikey is required in nagios mode and must be provided either via command line or in " \
+                        "the pager field of the contact definition in Nagios/Icinga"
+            syslog.syslog(syslog.LOG_ERR, error_msg)
+            parser.error(error_msg)
         persist_event(apikey, directory)
         lock_and_flush(host, directory, port)
     elif mode == "cron":
