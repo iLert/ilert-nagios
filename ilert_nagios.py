@@ -1,18 +1,17 @@
 #!/usr/bin/env python
 
 
-# iLert Nagios Plugin
+# iLert Nagios/Icinga Plugin
 #
-# Copyright (c) 2013, iLert UG. <info@ilert.de>
+# Copyright (c) 2013-2015, iLert UG. <info@ilert.de>
 # All rights reserved.
 
 
 import os
-import sys
 import syslog
 import fcntl
 import httplib
-import time
+import uuid
 from xml.sax.saxutils import escape
 from xml.sax.saxutils import quoteattr
 from optparse import OptionParser
@@ -20,34 +19,30 @@ from optparse import OptionParser
 PLUGIN_VERSION = "1.1"
 
 
-def persist_event(apikey, directory):
+def persist_event(api_key, directory):
     """Persists nagios event to disk"""
     syslog.syslog('writing event to disk...')
 
-    xmldoc = create_xml(apikey)
+    xml_doc = create_xml(api_key)
 
-    # Old UUID
-    # oneUuid = uuid.uuid4()
+    uid = uuid.uuid4()
 
-    # New UUID
-    oneUuid = int(time.time() * 100000)
-
-    filename = "%d.ilert" % oneUuid
-    filename_tmp = "%d.tmp" % oneUuid
+    filename = "%s.ilert" % uid
+    filename_tmp = "%s.tmp" % uid
     file_path = "%s/%s" % (directory, filename)
     file_path_tmp = "%s/%s" % (directory, filename_tmp)
 
     try:
         # atomic write using tmp file, see http://stackoverflow.com/questions/2333872
         f = open(file_path_tmp, "w")
-        f.write(xmldoc)
+        f.write(xml_doc)
         # make sure all data is on disk
         f.flush()
         # skip os.sync in favor of performance/responsiveness
         # os.fsync(f.fileno())
         f.close()
         os.rename(file_path_tmp, file_path)
-        syslog.syslog('created a nagios event in %s' % file_path)
+        syslog.syslog('created nagios event file in %s' % file_path)
     except Exception as e:
         syslog.syslog(syslog.LOG_ERR, "could not write nagios event to %s. Cause: %s %s" % (file_path, type(e), e.args))
         exit(1)
@@ -70,59 +65,57 @@ def lock_and_flush(host, directory, port):
 
 def flush(host, directory, port):
     """Send all events in event directory to iLert"""
-    syslog.syslog('sending nagios events to iLert...')
 
-    eventList = os.listdir(directory)
-    eventList.sort()
+    # populate list of event files sorted by creation date
+    events = [os.path.join(directory, f) for f in os.listdir(directory)]
+    events = filter(lambda x: x.endswith(".ilert"), events)
+    events.sort(key=lambda x: os.path.getmtime(x))
 
-    for event in eventList:
-        if event.endswith(".ilert"):
-            file_name = "%s/%s" % (directory, event)
+    n_events = len(events)
+    if n_events > 0:
+        syslog.syslog('sending %d events to iLert...' % n_events)
 
-            xmldoc = ""
-            try:
-                f = open(file_name, "r")
-                for line in f:
-                    xmldoc += line
-            except IOError:
-                continue
-            finally:
-                f.close()
+    for event in events:
+        try:
+            with open(event, 'r') as f:
+                xml_doc = f.read()
+        except IOError:
+            continue
 
-            syslog.syslog('sending event %s to ilert...' % event)
-            s_result = send(host, port, xmldoc)
+        syslog.syslog('sending event %s to iLert...' % event)
+        s_result = send(host, port, xml_doc)
 
-            if s_result == 0:
-                os.remove(file_name)
-                syslog.syslog('event %s has been sent to iLert and removed from event directory' % event)
-            else:
-                syslog.syslog(syslog.LOG_ERR, 'sending event %s failed' % event)
+        if s_result == 0:
+            os.remove(event)
+            syslog.syslog('event %s has been sent to iLert and removed from event directory' % event)
+        else:
+            syslog.syslog(syslog.LOG_ERR, 'sending event %s failed' % event)
 
 
 def create_xml(apikey):
-    """Create incident xml content with nagios macros provided via environment variables"""
+    """Create incident xml content with nagios or icinga macros provided via environment variables"""
 
-    xmldoc = "<event><apiKey>%s</apiKey><payload>" % apikey
+    xml_doc = "<event><apiKey>%s</apiKey><payload>" % apikey
 
-    # read NAGIOS macros from environment variables
+    # read NAGIOS/ICINGA macros from environment variables
     for env in os.environ:
         if "NAGIOS_" in env or "ICINGA_" in env:
-            xmldoc += "<entry key=%s>%s</entry>" % (quoteattr(env), escape(os.environ[env]))
+            xml_doc += "<entry key=%s>%s</entry>" % (quoteattr(env), escape(os.environ[env]))
 
-    xmldoc += "<entry key=\"%s\">%s</entry>" % ("PLUGIN_VERSION", PLUGIN_VERSION)
+    xml_doc += "<entry key=\"%s\">%s</entry>" % ("PLUGIN_VERSION", PLUGIN_VERSION)
 
     # XML document end tag
-    xmldoc += "</payload></event>"
+    xml_doc += "</payload></event>"
 
-    return xmldoc
+    return xml_doc
 
 
-def send(host, port, xmldoc):
+def send(host, port, xml_doc):
     """Send event to iLert"""
     headers = {"Content-type": "application/xml", "Accept": "application/xml"}
     data = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
 
-    data += xmldoc
+    data += xml_doc
 
     try:
         syslog.syslog('connecting to iLert at host %s and port %s...' % (host, port))
@@ -130,11 +123,14 @@ def send(host, port, xmldoc):
         conn.request("POST", "/rest/events", data, headers)
         response = conn.getresponse()
 
-        if (response.status == "200") or (response.reason == "OK"):
+        if response.status == 200:
+            return 0
+        elif response.status == 400:
+            syslog.syslog(syslog.LOG_WARNING, "event not accepted by iLert. Reason: %s" % response.read())
             return 0
         else:
-            syslog.syslog(syslog.LOG_ERR, "could not send nagios event to iLert. Status: %s, reason: %s" % (
-                response.status, response.reason))
+            syslog.syslog(syslog.LOG_ERR, "could not send nagios event to iLert. Status: %s (%s), reason: %s" % (
+                response.status, response.reason, response.read()))
             return 1
     except Exception as e:
         syslog.syslog(syslog.LOG_ERR, "could not send nagios event to iLert. Cause: %s %s" % (type(e), e.args))
@@ -178,19 +174,16 @@ def main():
     else:
         host = "ilertnow.com"
 
-    try:
-        if options.port is not None:
+    if options.port is not None:
+        try:
             port = int(options.port)
-            if port < 0 or port > 65535:
-                raise ValueError('Invalid port')
-        else:
-            port = 80
-
-    except ValueError as e:
-        print type(e)
-        print e.args
-        print "The port parameter has to be a number between 0 and 65535."
-        sys.exit()
+        except ValueError:
+            port = -1
+        if port < 0 or port > 65535:
+            syslog.syslog(syslog.LOG_ERR, 'invalid port number: %s, must be between 0 and 65535' % port)
+            exit(1)
+    else:
+        port = 80
 
     if not os.path.exists(directory):
         os.makedirs(directory)
@@ -201,7 +194,7 @@ def main():
     elif mode == "cron":
         lock_and_flush(host, directory, port)
     else:
-        parser.error("The iLert nagios plugin mode is not defined.")
+        parser.error('invalid mode parameter %s' % mode)
 
     exit(0)
 
