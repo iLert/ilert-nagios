@@ -10,7 +10,9 @@
 import os
 import syslog
 import fcntl
-import httplib
+import urllib2
+from urllib2 import HTTPError
+from urllib2 import URLError
 import uuid
 from xml.sax.saxutils import escape
 from xml.sax.saxutils import quoteattr
@@ -65,15 +67,13 @@ def lock_and_flush(host, directory, port):
 
 def flush(host, directory, port):
     """Send all events in event directory to iLert"""
+    headers = {"Content-type": "application/xml", "Accept": "application/xml"}
+    url = "http://%s:%s/rest/events" % (host, port)
 
     # populate list of event files sorted by creation date
     events = [os.path.join(directory, f) for f in os.listdir(directory)]
     events = filter(lambda x: x.endswith(".ilert"), events)
     events.sort(key=lambda x: os.path.getmtime(x))
-
-    n_events = len(events)
-    if n_events > 0:
-        syslog.syslog('sending %d events to iLert...' % n_events)
 
     for event in events:
         try:
@@ -83,60 +83,44 @@ def flush(host, directory, port):
             continue
 
         syslog.syslog('sending event %s to iLert...' % event)
-        s_result = send(host, port, xml_doc)
 
-        if s_result == 0:
+        try:
+            req = urllib2.Request(url, xml_doc, headers)
+            urllib2.urlopen(req, timeout=60)
+        except HTTPError as e:
+            if e.code == 400:
+                syslog.syslog(syslog.LOG_WARNING, "event not accepted by iLert. Reason: %s" % e.read())
+                os.remove(event)
+            else:
+                syslog.syslog(syslog.LOG_ERR,
+                              "could not send nagios event to iLert. HTTP error code %s, reason: %s, %s" % (
+                                  e.code, e.reason, e.read()))
+        except URLError as e:
+            syslog.syslog(syslog.LOG_ERR, "could not send nagios event to iLert. Reason: %s" % e.reason)
+        except Exception as e:
+            syslog.syslog(syslog.LOG_ERR,
+                          "an unexpected error occurred. Please report a bug. Cause: %s %s" % (type(e), e.args))
+        else:
             os.remove(event)
             syslog.syslog('event %s has been sent to iLert and removed from event directory' % event)
-        else:
-            syslog.syslog(syslog.LOG_ERR, 'sending event %s failed' % event)
 
 
 def create_xml(apikey):
     """Create incident xml content with nagios or icinga macros provided via environment variables"""
-
-    xml_doc = "<event><apiKey>%s</apiKey><payload>" % apikey
+    xml_doc = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    xml_doc += "<event><apiKey>%s</apiKey><payload>" % apikey
 
     # read NAGIOS/ICINGA macros from environment variables
     for env in os.environ:
         if "NAGIOS_" in env or "ICINGA_" in env:
             xml_doc += "<entry key=%s>%s</entry>" % (quoteattr(env), escape(os.environ[env]))
 
-    xml_doc += "<entry key=\"%s\">%s</entry>" % ("PLUGIN_VERSION", PLUGIN_VERSION)
+    xml_doc += '<entry key="%s">%s</entry>' % ("PLUGIN_VERSION", PLUGIN_VERSION)
 
     # XML document end tag
     xml_doc += "</payload></event>"
 
     return xml_doc
-
-
-def send(host, port, xml_doc):
-    """Send event to iLert"""
-    headers = {"Content-type": "application/xml", "Accept": "application/xml"}
-    data = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
-
-    data += xml_doc
-
-    try:
-        syslog.syslog('connecting to iLert at host %s and port %s...' % (host, port))
-        conn = httplib.HTTPConnection(host, port, timeout=60)
-        conn.request("POST", "/rest/events", data, headers)
-        response = conn.getresponse()
-
-        if response.status == 200:
-            return 0
-        elif response.status == 400:
-            syslog.syslog(syslog.LOG_WARNING, "event not accepted by iLert. Reason: %s" % response.read())
-            return 0
-        else:
-            syslog.syslog(syslog.LOG_ERR, "could not send nagios event to iLert. Status: %s (%s), reason: %s" % (
-                response.status, response.reason, response.read()))
-            return 1
-    except Exception as e:
-        syslog.syslog(syslog.LOG_ERR, "could not send nagios event to iLert. Cause: %s %s" % (type(e), e.args))
-        return 1
-    finally:
-        conn.close()
 
 
 def main():
