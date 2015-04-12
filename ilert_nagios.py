@@ -52,7 +52,7 @@ def persist_event(api_key, directory):
         f.close()
 
 
-def lock_and_flush(host, directory, port):
+def lock_and_flush(endpoint, directory, port):
     """Lock event directory and call flush"""
     lock_filename = "%s/lockfile" % directory
 
@@ -60,15 +60,15 @@ def lock_and_flush(host, directory, port):
 
     try:
         fcntl.flock(lockfile.fileno(), fcntl.LOCK_EX)
-        flush(host, directory, port)
+        flush(endpoint, directory, port)
     finally:
         lockfile.close()
 
 
-def flush(host, directory, port):
+def flush(endpoint, directory, port):
     """Send all events in event directory to iLert"""
     headers = {"Content-type": "application/xml", "Accept": "application/xml"}
-    url = "http://%s:%s/rest/events" % (host, port)
+    url = "%s:%s/rest/events" % (endpoint, port)
 
     # populate list of event files sorted by creation date
     events = [os.path.join(directory, f) for f in os.listdir(directory)]
@@ -125,11 +125,12 @@ def create_xml(apikey):
 
 def main():
     # Define nagios plugin options
-    parser = OptionParser("ilert_nagios.py -m {nagios|cron} [-a apikey] [-i iLertHost] [-p Port] [-d eventDir]")
+    parser = OptionParser("ilert_nagios.py -m {nagios|cron} [-a apikey] [-e endpoint] [-p port] [-d eventDir]")
     parser.add_option("-m", "--mode", dest="mode", help="Execution mode [nagios|cron]")
-    parser.add_option("-a", "--apikey", dest="apikey", help="(optional) API key for the iLert account")
-    parser.add_option("-i", "--iLerthost", dest="host", help="(optional) iLert host - default is ilertnow.com")
-    parser.add_option("-p", "--port", dest="port", help="(optional) host port - default port is 80")
+    parser.add_option("-a", "--apikey", dest="apikey", help="(optional) API key for the alert source in iLert")
+    parser.add_option("-e", "--endpoint", dest="endpoint",
+                      help="(optional) iLert API endpoint - default is https://ilertnow.com")
+    parser.add_option("-p", "--port", dest="port", help="(optional) endpoint port - default port is 443")
     parser.add_option("-d", "--dir", dest="directory",
                       help="(optional) event directory where incidents are stored - default is /tmp/ilert_nagios")
     (options, args) = parser.parse_args()
@@ -155,10 +156,10 @@ def main():
     else:
         apikey = None
 
-    if options.host is not None:
-        host = options.host
+    if options.endpoint is not None:
+        endpoint = options.endpoint
     else:
-        host = "ilertnow.com"
+        endpoint = "https://ilertnow.com"
 
     if options.port is not None:
         try:
@@ -169,7 +170,7 @@ def main():
             syslog.syslog(syslog.LOG_ERR, 'invalid port number: %s, must be between 0 and 65535' % port)
             exit(1)
     else:
-        port = 80
+        port = 443
 
     if not os.path.exists(directory):
         os.makedirs(directory)
@@ -181,9 +182,9 @@ def main():
             syslog.syslog(syslog.LOG_ERR, error_msg)
             parser.error(error_msg)
         persist_event(apikey, directory)
-        lock_and_flush(host, directory, port)
+        lock_and_flush(endpoint, directory, port)
     elif mode == "cron":
-        lock_and_flush(host, directory, port)
+        lock_and_flush(endpoint, directory, port)
     else:
         parser.error('invalid mode parameter %s' % mode)
 
