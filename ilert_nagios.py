@@ -186,6 +186,7 @@ def main():
     elif mode == "cron":
         lock_and_flush(endpoint, directory, port)
     else:
+        syslog.syslog(syslog.LOG_ERR, 'invalid mode parameter %s, use either nagios or cron' % mode)
         parser.error('invalid mode parameter %s' % mode)
 
     exit(0)
