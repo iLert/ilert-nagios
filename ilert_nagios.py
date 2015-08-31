@@ -3,7 +3,7 @@
 
 # iLert Nagios/Icinga Plugin
 #
-# Copyright (c) 2013-2015, iLert UG. <info@ilert.de>
+# Copyright (c) 2013-2015, iLert GmbH. <info@ilert.de>
 # All rights reserved.
 
 
@@ -16,16 +16,16 @@ from urllib2 import URLError
 import uuid
 from xml.sax.saxutils import escape
 from xml.sax.saxutils import quoteattr
-from optparse import OptionParser
+import argparse
 
-PLUGIN_VERSION = "1.1"
+PLUGIN_VERSION = "1.2"
 
 
-def persist_event(api_key, directory):
+def persist_event(api_key, directory, payload):
     """Persists nagios event to disk"""
     syslog.syslog('writing event to disk...')
 
-    xml_doc = create_xml(api_key)
+    xml_doc = create_xml(api_key, payload)
 
     uid = uuid.uuid4()
 
@@ -105,17 +105,14 @@ def flush(endpoint, directory, port):
             syslog.syslog('event %s has been sent to iLert and removed from event directory' % event)
 
 
-def create_xml(apikey):
-    """Create incident xml content with nagios or icinga macros provided via environment variables"""
+def create_xml(apikey, payload):
+    """Create event xml using the provided api key and event payload"""
     xml_doc = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
     xml_doc += "<event><apiKey>%s</apiKey><payload>" % apikey
 
     # read NAGIOS/ICINGA macros from environment variables
-    for env in os.environ:
-        if "NAGIOS_" in env or "ICINGA_" in env:
-            xml_doc += "<entry key=%s>%s</entry>" % (quoteattr(env), escape(os.environ[env]))
-
-    xml_doc += '<entry key="%s">%s</entry>' % ("PLUGIN_VERSION", PLUGIN_VERSION)
+    for entry in payload:
+        xml_doc += "<entry key=%s>%s</entry>" % (quoteattr(entry), escape(payload[entry]))
 
     # XML document end tag
     xml_doc += "</payload></event>"
@@ -124,31 +121,21 @@ def create_xml(apikey):
 
 
 def main():
-    # Define nagios plugin options
-    parser = OptionParser("ilert_nagios.py -m {nagios|cron} [-a apikey] [-e endpoint] [-p port] [-d eventDir]")
-    parser.add_option("-m", "--mode", dest="mode", help="Execution mode [nagios|cron]")
-    parser.add_option("-a", "--apikey", dest="apikey", help="(optional) API key for the alert source in iLert")
-    parser.add_option("-e", "--endpoint", dest="endpoint",
-                      help="(optional) iLert API endpoint - default is https://ilertnow.com")
-    parser.add_option("-p", "--port", dest="port", help="(optional) endpoint port - default port is 443")
-    parser.add_option("-d", "--dir", dest="directory",
-                      help="(optional) event directory where incidents are stored - default is /tmp/ilert_nagios")
-    (options, args) = parser.parse_args()
+    parser = argparse.ArgumentParser(description='send events from Nagios (and its forks, such as Icinga) to iLert')
+    parser.add_argument('-m', '--mode', choices=['nagios', 'cron'], required=True, help='Execution mode')
+    parser.add_argument('-a', '--apikey', help='API key for the alert source in iLert')
+    parser.add_argument('-e', '--endpoint', default='https://ilertnow.com',
+                        help='iLert API endpoint (default: %(default)s)')
+    parser.add_argument('-p', '--port', type=int, default=443, help='endpoint port (default: %(default)s)')
+    parser.add_argument('-d', '--dir', default='/tmp/ilert_nagios',
+                        help='event directory where events are stored (default: %(default)s)')
+    parser.add_argument('--version', action='version', version=PLUGIN_VERSION)
+    parser.add_argument('macros', nargs=argparse.REMAINDER,
+                        help='key value pairs in the format key1=value1 key2=value2 ...')
+    args = parser.parse_args()
 
-    # required parameters
-    if options.mode is not None:
-        mode = options.mode
-    else:
-        parser.error('missing required mode parameter.')
-
-    # optional parameters
-    if options.directory is not None:
-        directory = options.directory
-    else:
-        directory = "/tmp/ilert_nagios"
-
-    if options.apikey is not None:
-        apikey = options.apikey
+    if args.apikey is not None:
+        apikey = args.apikey
     elif 'NAGIOS_CONTACTPAGER' in os.environ:
         apikey = os.environ['NAGIOS_CONTACTPAGER']
     elif 'ICINGA_CONTACTPAGER' in os.environ:
@@ -156,37 +143,26 @@ def main():
     else:
         apikey = None
 
-    if options.endpoint is not None:
-        endpoint = options.endpoint
-    else:
-        endpoint = "https://ilertnow.com"
+    if not os.path.exists(args.dir):
+        os.makedirs(args.dir)
 
-    if options.port is not None:
-        try:
-            port = int(options.port)
-        except ValueError:
-            port = -1
-        if port < 0 or port > 65535:
-            syslog.syslog(syslog.LOG_ERR, 'invalid port number: %s, must be between 0 and 65535' % port)
-            exit(1)
-    else:
-        port = 443
+    payload = dict(PLUGIN_VERSION=PLUGIN_VERSION)
+    for env in os.environ:
+        if "NAGIOS_" in env or "ICINGA_" in env:
+            payload[env] = os.environ[env]
 
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+    payload.update([arg.split('=', 1) for arg in args.macros])
 
-    if mode == "nagios":
+    if args.mode == "nagios":
         if apikey is None:
             error_msg = "parameter apikey is required in nagios mode and must be provided either via command line or in " \
                         "the pager field of the contact definition in Nagios/Icinga"
             syslog.syslog(syslog.LOG_ERR, error_msg)
             parser.error(error_msg)
-        persist_event(apikey, directory)
-        lock_and_flush(endpoint, directory, port)
-    elif mode == "cron":
-        lock_and_flush(endpoint, directory, port)
-    else:
-        parser.error('invalid mode parameter %s' % mode)
+        persist_event(apikey, args.dir, payload)
+        lock_and_flush(args.endpoint, args.dir, args.port)
+    elif args.mode == "cron":
+        lock_and_flush(args.endpoint, args.dir, args.port)
 
     exit(0)
 
