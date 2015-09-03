@@ -133,13 +133,14 @@ def main():
                         help='event payload as key value pairs in the format key1=value1 key2=value2 ...')
     args = parser.parse_args()
 
-    # populate paylad data from environment variables and macros specified via command line
+    # populate payload data from environment variables
     payload = dict(PLUGIN_VERSION=PLUGIN_VERSION)
     for env in os.environ:
         if "NAGIOS_" in env or "ICINGA_" in env:
             payload[env] = os.environ[env]
 
-    payload.update([arg.split('=', 1) for arg in args.macros])
+    # ... and payload specified via command line
+    payload.update([arg.split('=', 1) for arg in args.payload])
 
     if args.apikey is not None:
         apikey = args.apikey
