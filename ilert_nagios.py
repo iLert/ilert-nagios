@@ -22,7 +22,7 @@ PLUGIN_VERSION = "1.2"
 
 
 def persist_event(api_key, directory, payload):
-    """Persists nagios event to disk"""
+    """Persists event to disk"""
     syslog.syslog('writing event to disk...')
 
     xml_doc = create_xml(api_key, payload)
@@ -36,20 +36,18 @@ def persist_event(api_key, directory, payload):
 
     try:
         # atomic write using tmp file, see http://stackoverflow.com/questions/2333872
-        f = open(file_path_tmp, "w")
-        f.write(xml_doc)
-        # make sure all data is on disk
-        f.flush()
-        # skip os.sync in favor of performance/responsiveness
-        # os.fsync(f.fileno())
-        f.close()
-        os.rename(file_path_tmp, file_path)
-        syslog.syslog('created nagios event file in %s' % file_path)
+        with open(file_path_tmp, "w") as f:
+            f.write(xml_doc)
+            # make sure all data is on disk
+            f.flush()
+            # skip os.sync in favor of performance/responsiveness
+            # os.fsync(f.fileno())
+            f.close()
+            os.rename(file_path_tmp, file_path)
+            syslog.syslog('created event file in %s' % file_path)
     except Exception as e:
-        syslog.syslog(syslog.LOG_ERR, "could not write nagios event to %s. Cause: %s %s" % (file_path, type(e), e.args))
+        syslog.syslog(syslog.LOG_ERR, "could not write event to %s. Cause: %s %s" % (file_path, type(e), e.args))
         exit(1)
-    finally:
-        f.close()
 
 
 def lock_and_flush(endpoint, directory, port):
@@ -93,10 +91,10 @@ def flush(endpoint, directory, port):
                 os.remove(event)
             else:
                 syslog.syslog(syslog.LOG_ERR,
-                              "could not send nagios event to iLert. HTTP error code %s, reason: %s, %s" % (
+                              "could not send event to iLert. HTTP error code %s, reason: %s, %s" % (
                                   e.code, e.reason, e.read()))
         except URLError as e:
-            syslog.syslog(syslog.LOG_ERR, "could not send nagios event to iLert. Reason: %s" % e.reason)
+            syslog.syslog(syslog.LOG_ERR, "could not send event to iLert. Reason: %s" % e.reason)
         except Exception as e:
             syslog.syslog(syslog.LOG_ERR,
                           "an unexpected error occurred. Please report a bug. Cause: %s %s" % (type(e), e.args))
@@ -122,7 +120,9 @@ def create_xml(apikey, payload):
 
 def main():
     parser = argparse.ArgumentParser(description='send events from Nagios (and its forks, such as Icinga) to iLert')
-    parser.add_argument('-m', '--mode', choices=['nagios', 'cron'], required=True, help='Execution mode')
+    parser.add_argument('-m', '--mode', choices=['nagios', 'save', 'cron', 'send'], required=True,
+                        help='Execution mode: "save" persists an event to disk and "send" submits all saved events '
+                             'to iLert. Note that after every "save" "send" will also be called.')
     parser.add_argument('-a', '--apikey', help='API key for the alert source in iLert')
     parser.add_argument('-e', '--endpoint', default='https://ilertnow.com',
                         help='iLert API endpoint (default: %(default)s)')
@@ -130,22 +130,11 @@ def main():
     parser.add_argument('-d', '--dir', default='/tmp/ilert_nagios',
                         help='event directory where events are stored (default: %(default)s)')
     parser.add_argument('--version', action='version', version=PLUGIN_VERSION)
-    parser.add_argument('macros', nargs=argparse.REMAINDER,
-                        help='key value pairs in the format key1=value1 key2=value2 ...')
+    parser.add_argument('payload', nargs=argparse.REMAINDER,
+                        help='event payload as key value pairs in the format key1=value1 key2=value2 ...')
     args = parser.parse_args()
 
-    if args.apikey is not None:
-        apikey = args.apikey
-    elif 'NAGIOS_CONTACTPAGER' in os.environ:
-        apikey = os.environ['NAGIOS_CONTACTPAGER']
-    elif 'ICINGA_CONTACTPAGER' in os.environ:
-        apikey = os.environ['ICINGA_CONTACTPAGER']
-    else:
-        apikey = None
-
-    if not os.path.exists(args.dir):
-        os.makedirs(args.dir)
-
+    # populate paylad data from environment variables and macros specified via command line
     payload = dict(PLUGIN_VERSION=PLUGIN_VERSION)
     for env in os.environ:
         if "NAGIOS_" in env or "ICINGA_" in env:
@@ -153,15 +142,29 @@ def main():
 
     payload.update([arg.split('=', 1) for arg in args.macros])
 
-    if args.mode == "nagios":
+    if args.apikey is not None:
+        apikey = args.apikey
+    elif 'NAGIOS_CONTACTPAGER' in payload:
+        apikey = payload['NAGIOS_CONTACTPAGER']
+    elif 'ICINGA_CONTACTPAGER' in payload:
+        apikey = payload['ICINGA_CONTACTPAGER']
+    elif 'CONTACTPAGER' in payload:
+        apikey = payload['CONTACTPAGER']
+    else:
+        apikey = None
+
+    if not os.path.exists(args.dir):
+        os.makedirs(args.dir)
+
+    if args.mode == "nagios" or args.mode == "save":
         if apikey is None:
-            error_msg = "parameter apikey is required in nagios mode and must be provided either via command line or in " \
+            error_msg = "parameter apikey is required in save mode and must be provided either via command line or in " \
                         "the pager field of the contact definition in Nagios/Icinga"
             syslog.syslog(syslog.LOG_ERR, error_msg)
             parser.error(error_msg)
         persist_event(apikey, args.dir, payload)
         lock_and_flush(args.endpoint, args.dir, args.port)
-    elif args.mode == "cron":
+    elif args.mode == "cron" or args.mode == "send":
         lock_and_flush(args.endpoint, args.dir, args.port)
 
     exit(0)
