@@ -108,7 +108,6 @@ def create_xml(apikey, payload):
     xml_doc = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
     xml_doc += "<event><apiKey>%s</apiKey><payload>" % apikey
 
-    # read NAGIOS/ICINGA macros from environment variables
     for entry in payload:
         xml_doc += "<entry key=%s>%s</entry>" % (quoteattr(entry), escape(payload[entry]))
 
