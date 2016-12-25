@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
 
-# iLert Nagios/Icinga Plugin
+# iLert Nagios/Icinga/Check_MK Plugin
 #
-# Copyright (c) 2013-2015, iLert GmbH. <info@ilert.de>
+# Copyright (c) 2013-2016, iLert GmbH. <info@ilert.de>
 # All rights reserved.
 
 
@@ -18,7 +18,7 @@ from xml.sax.saxutils import escape
 from xml.sax.saxutils import quoteattr
 import argparse
 
-PLUGIN_VERSION = "1.2"
+PLUGIN_VERSION = "1.3"
 
 
 def persist_event(api_key, directory, payload):
@@ -66,7 +66,7 @@ def lock_and_flush(endpoint, directory, port):
 def flush(endpoint, directory, port):
     """Send all events in event directory to iLert"""
     headers = {"Content-type": "application/xml", "Accept": "application/xml"}
-    url = "%s:%s/rest/events" % (endpoint, port)
+    url = "%s:%s/api/v1/events/nagios" % (endpoint, port)
 
     # populate list of event files sorted by creation date
     events = [os.path.join(directory, f) for f in os.listdir(directory)]
@@ -136,7 +136,7 @@ def main():
     # populate payload data from environment variables
     payload = dict(PLUGIN_VERSION=PLUGIN_VERSION)
     for env in os.environ:
-        if "NAGIOS_" in env or "ICINGA_" in env:
+        if "NAGIOS_" in env or "ICINGA_" in env or "NOTIFY_" in env:
             payload[env] = os.environ[env]
 
     # ... and payload specified via command line
@@ -148,6 +148,8 @@ def main():
         apikey = payload['NAGIOS_CONTACTPAGER']
     elif 'ICINGA_CONTACTPAGER' in payload:
         apikey = payload['ICINGA_CONTACTPAGER']
+    elif 'NOTIFY_CONTACTPAGER' in payload:
+        apikey = payload['NOTIFY_CONTACTPAGER']
     elif 'CONTACTPAGER' in payload:
         apikey = payload['CONTACTPAGER']
     else:
