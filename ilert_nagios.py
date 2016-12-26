@@ -148,8 +148,6 @@ def main():
         apikey = payload['NAGIOS_CONTACTPAGER']
     elif 'ICINGA_CONTACTPAGER' in payload:
         apikey = payload['ICINGA_CONTACTPAGER']
-    elif 'NOTIFY_CONTACTPAGER' in payload:
-        apikey = payload['NOTIFY_CONTACTPAGER']
     elif 'CONTACTPAGER' in payload:
         apikey = payload['CONTACTPAGER']
     else:
