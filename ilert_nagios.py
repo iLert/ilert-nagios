@@ -3,7 +3,7 @@
 
 # iLert Nagios/Icinga/Check_MK Plugin
 #
-# Copyright (c) 2013-2016, iLert GmbH. <info@ilert.de>
+# Copyright (c) 2013-2018, iLert GmbH. <info@ilert.de>
 # All rights reserved.
 
 
@@ -18,7 +18,7 @@ from xml.sax.saxutils import escape
 from xml.sax.saxutils import quoteattr
 import argparse
 
-PLUGIN_VERSION = "1.3"
+PLUGIN_VERSION = "1.4"
 
 
 def persist_event(api_key, directory, payload):
@@ -86,7 +86,9 @@ def flush(endpoint, directory, port):
             req = urllib2.Request(url, xml_doc, headers)
             urllib2.urlopen(req, timeout=60)
         except HTTPError as e:
-            if e.code == 400:
+            if e.code == 429:
+                syslog.syslog(syslog.LOG_WARNING, "too many requests, will try later. Server response: %s" % e.read())
+            elif 400 <= e.code <= 499:
                 syslog.syslog(syslog.LOG_WARNING, "event not accepted by iLert. Reason: %s" % e.read())
                 os.remove(event)
             else:
