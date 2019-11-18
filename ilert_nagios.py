@@ -17,6 +17,7 @@ import uuid
 from xml.sax.saxutils import escape
 from xml.sax.saxutils import quoteattr
 import argparse
+import io
 
 PLUGIN_VERSION = "1.4"
 
@@ -36,7 +37,7 @@ def persist_event(api_key, directory, payload):
 
     try:
         # atomic write using tmp file, see http://stackoverflow.com/questions/2333872
-        with open(file_path_tmp, "w") as f:
+        with io.open(file_path_tmp, mode="w", encoding="utf-8") as f:
             f.write(xml_doc)
             # make sure all data is on disk
             f.flush()
@@ -111,7 +112,7 @@ def create_xml(apikey, payload):
     xml_doc += "<event><apiKey>%s</apiKey><payload>" % apikey
 
     for entry in payload:
-        xml_doc += "<entry key=%s>%s</entry>" % (quoteattr(entry), escape(payload[entry]))
+        xml_doc += "<entry key=%s>%s</entry>" % (quoteattr(entry), unicode(escape(payload[entry]), encoding='utf-8', errors='ignore'))
 
     # XML document end tag
     xml_doc += "</payload></event>"
