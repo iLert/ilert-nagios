@@ -3,7 +3,7 @@
 
 # iLert Nagios/Icinga/Check_MK Plugin
 #
-# Copyright (c) 2013-2018, iLert GmbH. <info@ilert.de>
+# Copyright (c) 2013-2020, iLert GmbH. <support@ilert.com>
 # All rights reserved.
 
 
