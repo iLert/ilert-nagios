@@ -1,0 +1,7 @@
+---
+version: "3"
+services:
+  nagios:
+    build:
+      context: .
+      dockerfile: Dockerfile
