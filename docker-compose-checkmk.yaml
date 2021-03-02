@@ -1,0 +1,29 @@
+---
+version: "3"
+services:
+  checkmk:
+    image: checkmk/check-mk-raw:1.6.0
+    restart: always
+    hostname: checkmk.local
+    command: >
+      bash -c "set -e;
+      echo 'Initialize plugins...';
+      chmod 755 /usr/local/bin/ilert_nagios.py ;
+      chmod 755 /omd/sites/cmk/share/check_mk/notifications/ilert_check_mk.sh;
+      /docker-entrypoint.sh"
+    ulimits:
+      nofile: 1024
+    ports:
+      - "5000:5000"
+    volumes:
+      - checkmk_data:/omd/sites
+      - /etc/localtime:/etc/localtime:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./ilert_nagios.py:/usr/local/bin/ilert_nagios.py
+      - ./ilert_check_mk.sh:/omd/sites/cmk/share/check_mk/notifications/ilert_check_mk.sh
+    environment:
+      CMK_USERNAME: cmkadmin
+      CMK_PASSWORD: cmkadmin
+
+volumes:
+  checkmk_data: {}
