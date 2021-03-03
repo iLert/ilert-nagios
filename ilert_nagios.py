@@ -20,7 +20,7 @@ from xml.sax.saxutils import quoteattr
 import argparse
 import io
 
-PLUGIN_VERSION = "1.4"
+PLUGIN_VERSION = "1.6"
 
 
 def persist_event(api_key, directory, payload):
@@ -125,20 +125,30 @@ def create_xml(apikey, payload):
     return xml_doc
 
 
+def str_to_bool(v):
+    if isinstance(v, bool):
+       return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def main():
     parser = argparse.ArgumentParser(description='send events from Nagios (and its forks, such as Icinga) to iLert')
     parser.add_argument('-m', '--mode', choices=['nagios', 'save', 'cron', 'send'], required=True,
                         help='Execution mode: "save" persists an event to disk and "send" submits all saved events '
                              'to iLert. Note that after every "save" "send" will also be called.')
     parser.add_argument('-a', '--apikey', help='API key for the alert source in iLert')
-    parser.add_argument('-e', '--endpoint', default='https://ilertnow.com',
+    parser.add_argument('-e', '--endpoint', default='https://api.ilert.com',
                         help='iLert API endpoint (default: %(default)s)')
     parser.add_argument('-p', '--port', type=int, default=443, help='Endpoint port (default: %(default)s)')
     parser.add_argument('-d', '--dir', default='/tmp/ilert_nagios',
                         help='Event directory where events are stored (default: %(default)s)')
     parser.add_argument('--version', action='version', version=PLUGIN_VERSION)
-    parser.add_argument('-k', '--insecure', type=bool, default=False,
-                        help='Allow insecure server connections when using SSL (default: %(default)s)')
+    parser.add_argument('-k', '--insecure', type=str_to_bool, nargs='?', const=True, default=False,
+                        help='Disable SSL certification validation (e.g. to use self-signed certificates) (default: %(default)s)')
     parser.add_argument('-x', '--proxy', help='Use proxy for the outbound traffic')
     parser.add_argument('payload', nargs=argparse.REMAINDER,
                         help='Event payload as key value pairs in the format key1=value1 key2=value2 ...')
