@@ -14,6 +14,7 @@ import urllib2
 from urllib2 import HTTPError
 from urllib2 import URLError
 import uuid
+import ssl
 from xml.sax.saxutils import escape
 from xml.sax.saxutils import quoteattr
 import argparse
@@ -51,7 +52,7 @@ def persist_event(api_key, directory, payload):
         exit(1)
 
 
-def lock_and_flush(endpoint, directory, port):
+def lock_and_flush(endpoint, directory, port, insecure):
     """Lock event directory and call flush"""
     lock_filename = "%s/lockfile" % directory
 
@@ -59,12 +60,12 @@ def lock_and_flush(endpoint, directory, port):
 
     try:
         fcntl.flock(lockfile.fileno(), fcntl.LOCK_EX)
-        flush(endpoint, directory, port)
+        flush(endpoint, directory, port, insecure)
     finally:
         lockfile.close()
 
 
-def flush(endpoint, directory, port):
+def flush(endpoint, directory, port, insecure):
     """Send all events in event directory to iLert"""
     headers = {"Content-type": "application/xml", "Accept": "application/xml"}
     url = "%s:%s/api/v1/events/nagios" % (endpoint, port)
@@ -84,8 +85,12 @@ def flush(endpoint, directory, port):
         syslog.syslog('sending event %s to iLert...' % event)
 
         try:
+            ctx = ssl.create_default_context()
+            if insecure == True:
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
             req = urllib2.Request(url, xml_doc, headers)
-            urllib2.urlopen(req, timeout=60)
+            urllib2.urlopen(req, timeout=60, context=ctx)
         except HTTPError as e:
             if e.code == 429:
                 syslog.syslog(syslog.LOG_WARNING, "too many requests, will try later. Server response: %s" % e.read())
@@ -128,12 +133,15 @@ def main():
     parser.add_argument('-a', '--apikey', help='API key for the alert source in iLert')
     parser.add_argument('-e', '--endpoint', default='https://ilertnow.com',
                         help='iLert API endpoint (default: %(default)s)')
-    parser.add_argument('-p', '--port', type=int, default=443, help='endpoint port (default: %(default)s)')
+    parser.add_argument('-p', '--port', type=int, default=443, help='Endpoint port (default: %(default)s)')
     parser.add_argument('-d', '--dir', default='/tmp/ilert_nagios',
-                        help='event directory where events are stored (default: %(default)s)')
+                        help='Event directory where events are stored (default: %(default)s)')
     parser.add_argument('--version', action='version', version=PLUGIN_VERSION)
+    parser.add_argument('-k', '--insecure', type=bool, default=False,
+                        help='Allow insecure server connections when using SSL (default: %(default)s)')
+    parser.add_argument('-x', '--proxy', help='Use proxy for the outbound traffic')
     parser.add_argument('payload', nargs=argparse.REMAINDER,
-                        help='event payload as key value pairs in the format key1=value1 key2=value2 ...')
+                        help='Event payload as key value pairs in the format key1=value1 key2=value2 ...')
     args = parser.parse_args()
 
     # populate payload data from environment variables
@@ -159,6 +167,10 @@ def main():
     if not os.path.exists(args.dir):
         os.makedirs(args.dir)
 
+    if args.proxy is not None:
+        os.environ['http_proxy'] = args.proxy
+        os.environ['https_proxy'] = args.proxy
+
     if args.mode == "nagios" or args.mode == "save":
         if apikey is None:
             error_msg = "parameter apikey is required in save mode and must be provided either via command line or in " \
@@ -166,9 +178,9 @@ def main():
             syslog.syslog(syslog.LOG_ERR, error_msg)
             parser.error(error_msg)
         persist_event(apikey, args.dir, payload)
-        lock_and_flush(args.endpoint, args.dir, args.port)
+        lock_and_flush(args.endpoint, args.dir, args.port, args.insecure)
     elif args.mode == "cron" or args.mode == "send":
-        lock_and_flush(args.endpoint, args.dir, args.port)
+        lock_and_flush(args.endpoint, args.dir, args.port, args.insecure)
 
     exit(0)
 
