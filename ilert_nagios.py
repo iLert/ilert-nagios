@@ -20,7 +20,7 @@ from xml.sax.saxutils import quoteattr
 import argparse
 import io
 
-PLUGIN_VERSION = "1.0"
+PLUGIN_VERSION = "1.7"
 
 
 def persist_event(api_key, directory, payload):
